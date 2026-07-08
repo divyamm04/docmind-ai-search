@@ -81,7 +81,11 @@ function SearchBox() {
             <span>🤖</span>
             <span>AI Answer</span>
           </div>
-          <p className="answer-card-text">{answer}</p>
+          <p className="answer-card-text">
+  THIS IS A TEST
+  <br />
+  {answer}
+</p>
         </div>
       ) : (
         !loading && (

@@ -1,4 +1,4 @@
-def chunk_text(pages, chunk_size=500, overlap=50):
+def chunk_text(pages, chunk_size=400, overlap=100):
     chunks = []
 
     if not pages:
