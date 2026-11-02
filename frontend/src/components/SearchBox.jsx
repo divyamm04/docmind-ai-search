@@ -1,43 +1,40 @@
-import React, { useState } from "react";
-import axios from "axios";
+import { useState } from "react";
+import { api, errorMessage } from "../api";
+import AnswerText from "./AnswerText";
 
-function SearchBox() {
+// Older responses only carry the raw L2 distance; derive similarity the same
+// way the backend does (unit vectors, so cosine = 1 - d / 2).
+function similarityOf(result) {
+  if (typeof result.similarity === "number") return result.similarity;
+  return Math.max(0, Math.min(1, 1 - result.score / 2));
+}
+
+function SearchBox({ document }) {
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [results, setResults] = useState([]);
+  const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expandedIndex, setExpandedIndex] = useState(null);
 
-  const handleSearch = async () => {
+  const handleSearch = async (e) => {
+    e.preventDefault();
     if (!question.trim()) {
-      setError("Please enter a question.");
+      setError("Type a question first.");
       return;
     }
 
     setLoading(true);
     setError("");
-    setAnswer("");
-    setResults([]);
     setExpandedIndex(null);
 
     try {
-      const response = await axios.post("http://127.0.0.1:8000/query", {
-        question: question,
-      });
-
-      setAnswer(response.data.answer || "");
-      setResults(response.data.results || []);
+      const res = await api.post("/query", { question });
+      setResponse(res.data);
     } catch (err) {
-      setError("Search failed. Please try again.");
+      setResponse(null);
+      setError(errorMessage(err, "The question couldn't be answered."));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") {
-      handleSearch();
     }
   };
 
@@ -45,107 +42,107 @@ function SearchBox() {
     setExpandedIndex(expandedIndex === index ? null : index);
   };
 
+  const results = response?.results || [];
+  const showExpanded =
+    response?.expanded_query &&
+    response.expanded_query.trim() !== response.question.trim();
+
   return (
     <>
-      <div>
-        <h1 className="workspace-heading">Ask your documents</h1>
-        <p className="workspace-subheading">
-          Answers are generated from the PDFs you've indexed.
-        </p>
-      </div>
-
-      <div className="search-bar">
-        <span className="search-icon">🔎</span>
-        <input
-          type="text"
-          placeholder="Ask something about your documents…"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-        <button
-          onClick={handleSearch}
-          disabled={loading}
-          className="btn-primary"
-        >
-          {loading ? "Searching…" : "Search"}
-        </button>
-      </div>
-
-      {error && <p className="inline-error">{error}</p>}
-      {loading && <p className="status-text">Retrieving relevant passages…</p>}
-
-      {answer ? (
-        <div className="answer-card">
-          <div className="answer-card-header">
-            <span>🤖</span>
-            <span>AI Answer</span>
-          </div>
-          <p className="answer-card-text">
-  THIS IS A TEST
-  <br />
-  {answer}
-</p>
+      <form className="ask" onSubmit={handleSearch}>
+        <label htmlFor="question" className="ask-label">
+          Ask about <cite>{document.filename}</cite>
+        </label>
+        <div className="ask-row">
+          <input
+            id="question"
+            type="text"
+            autoComplete="off"
+            placeholder="What does the document say about…"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+          />
+          <button type="submit" disabled={loading} className="btn-primary">
+            {loading ? "Asking…" : "Ask"}
+          </button>
         </div>
-      ) : (
-        !loading && (
-          <div className="answer-placeholder">
-            Ask a question to get an answer grounded in your uploaded
-            documents.
-          </div>
-        )
+      </form>
+
+      {error && (
+        <p className="note-error" role="alert">
+          {error}
+        </p>
       )}
 
-      {results.length > 0 && (
-        <div>
-          <div className="sources-header">
-            <span className="sources-title">Sources</span>
-            <span className="sources-count">{results.length}</span>
+      {loading && (
+        <p className="status" role="status">
+          Finding the closest passages and writing an answer…
+        </p>
+      )}
+
+      {!response && !loading && !error && (
+        <p className="empty">
+          Answers come only from this document. When it doesn't cover a
+          question, the model is told to say so instead of guessing.
+        </p>
+      )}
+
+      {response && !loading && (
+        <article className="answer" aria-live="polite">
+          <h2 className="answer-question">{response.question}</h2>
+          {showExpanded && (
+            <p className="searched-as">
+              Searched as “{response.expanded_query}”
+            </p>
+          )}
+
+          <div className="answer-body">
+            <AnswerText text={response.answer || "No answer was returned."} />
           </div>
 
-          <div className="sources-list">
-            {results.map((result, index) => {
-              const isExpanded = expandedIndex === index;
-              return (
-                <div
-                  className="citation-card"
-                  key={index}
-                  onClick={() => toggleExpand(index)}
-                >
-                  <div className="citation-card-top">
-                    <div className="citation-meta">
-                      <span>📄</span>
-                      <span className="citation-page">
-                        Page {result.page}
-                      </span>
-                    </div>
-                    <div className="citation-right">
-                      <span className="citation-score">
-                        {typeof result.score === "number"
-                          ? result.score.toFixed(3)
-                          : result.score}
-                      </span>
-                      <span
-                        className={`citation-chevron${
-                          isExpanded ? " expanded" : ""
-                        }`}
-                      >
-                        ▾
-                      </span>
-                    </div>
-                  </div>
-                  <p
-                    className={`citation-preview${
-                      isExpanded ? " expanded" : ""
-                    }`}
-                  >
-                    {result.text}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+          {results.length > 0 && (
+            <section className="passages" aria-labelledby="passages-heading">
+              <h3 id="passages-heading" className="passages-heading">
+                Passages used ({results.length})
+              </h3>
+
+              <ol className="passage-list">
+                {results.map((result, index) => {
+                  const isExpanded = expandedIndex === index;
+                  return (
+                    <li className="passage" key={index}>
+                      <span className="folio">p.&nbsp;{result.page}</span>
+                      <div>
+                        <p
+                          id={`passage-${index}`}
+                          className={`passage-text${
+                            isExpanded ? " is-open" : ""
+                          }`}
+                        >
+                          {result.text}
+                        </p>
+                        <div className="passage-meta">
+                          <span>
+                            {Math.round(similarityOf(result) * 100)}% match
+                          </span>
+                          <button
+                            type="button"
+                            className="link-btn"
+                            aria-expanded={isExpanded}
+                            aria-controls={`passage-${index}`}
+                            onClick={() => toggleExpand(index)}
+                          >
+                            {isExpanded ? "Show less" : "Show full passage"}
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          )}
+        </article>
       )}
     </>
   );
